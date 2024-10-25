@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/fiatjaf/eventstore"
@@ -28,6 +29,9 @@ type SliceStore struct {
 	stats           IndexStats
 	idstats         IndexStats
 	kindauthorstats IndexStats
+
+	// locks
+	mu sync.RWMutex
 }
 
 type KindAuthor struct {
@@ -104,12 +108,14 @@ func (b *SliceStore) LoadEventsFromDisk() error {
 	}
 
 	// Rebuild the index
+	b.mu.Lock()
 	*b.indexId = map[string]*nostr.Event{}
 	*b.indexKindAuthor = map[KindAuthor][]*nostr.Event{}
 	for _, evt := range b.internal {
 		(*b.indexId)[evt.ID] = evt
 		b.AddEventToIndex(evt)
 	}
+	b.mu.Unlock()
 
 	return nil
 }
@@ -148,6 +154,8 @@ func (b *SliceStore) QueryEvents(ctx context.Context, filter nostr.Filter) (chan
 	if len(filter.IDs) == 1 {
 		go measureTime(&b.idstats, func() int {
 			count := 0
+			b.mu.RLock()
+			defer b.mu.RUnlock()
 			if evt, ok := (*b.indexId)[filter.IDs[0]]; ok {
 				if filter.Matches(evt) {
 					ch <- evt
@@ -163,7 +171,10 @@ func (b *SliceStore) QueryEvents(ctx context.Context, filter nostr.Filter) (chan
 	if len(filter.Kinds) == 1 && len(filter.Authors) == 1 {
 		go measureTime(&b.kindauthorstats, func() int {
 			count := 0
-			if events, ok := (*b.indexKindAuthor)[KindAuthor{Kind: filter.Kinds[0], Author: filter.Authors[0]}]; ok {
+			b.mu.RLock()
+			events, ok := (*b.indexKindAuthor)[KindAuthor{Kind: filter.Kinds[0], Author: filter.Authors[0]}]
+			b.mu.RUnlock()
+			if ok {
 				for _, evt := range events {
 					if count >= filter.Limit {
 						break
@@ -290,8 +301,10 @@ func (b *SliceStore) SaveEvent(ctx context.Context, evt *nostr.Event) error {
 	b.internal[idx] = evt
 
 	// update the index
+	b.mu.Lock()
 	(*b.indexId)[evt.ID] = evt
 	b.AddEventToIndex(evt)
+	b.mu.Unlock()
 
 	return nil
 }
@@ -308,8 +321,10 @@ func (b *SliceStore) DeleteEvent(ctx context.Context, evt *nostr.Event) error {
 	b.internal = b.internal[0 : len(b.internal)-1]
 
 	// update the index
+	b.mu.Lock()
 	delete(*b.indexId, evt.ID)
 	b.RemoveEventFromIndex(evt)
+	b.mu.Unlock()
 
 	return nil
 }
