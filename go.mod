@@ -1,4 +1,4 @@
-module gitea.girino.org/girino/nostr-relay
+module gitea.girino.org/girino/mem-relay
 
 go 1.23.0
 

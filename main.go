@@ -21,7 +21,7 @@ import (
 
 	"github.com/fiatjaf/khatru"
 
-	"gitea.girino.org/girino/nostr-relay/slicestore"
+	"gitea.girino.org/girino/mem-relay/slicestore"
 
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/nbd-wtf/go-nostr/nip19"
