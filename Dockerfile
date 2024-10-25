@@ -12,10 +12,11 @@ RUN go mod download
 
 # Copy the rest of the application source code
 COPY ./*.go .
+COPY ./slicestore ./slicestore
 COPY ./templates ./templates
 
 # Build the Go application
-RUN go build -o relay .
+RUN go build -o mem-relay .
 
 # Create a non-privileged user
 RUN groupadd -g 900 relay && useradd -u 900 -g 900 -m relay
@@ -30,4 +31,4 @@ USER relay
 EXPOSE 3336
 
 # Set the command to run the executable
-CMD ["./relay"]
+CMD ["./mem-relay"]
