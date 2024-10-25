@@ -355,5 +355,10 @@ func printStats(name string, stats IndexStats) {
 		averagePerRun = stats.TotalTime / time.Duration(stats.Runcount)
 	}
 	// also print the average time
-	fmt.Printf("%s: Count: %5d, RunCount: %5d, Maxtime: %-9s, Mintime: %-9s, AverageTime: %-9s, AveragePerRun %-9s\n", name, stats.Count, stats.Runcount, stats.Maxtime.String(), stats.Mintime.String(), averageTime.String(), averagePerRun.String())
+	fmt.Printf("%s: Count:        %d\n"+
+		"          : RunCount:     %d\n"+
+		"          : Maxtime:      %s\n"+
+		"          : Mintime:      %s\n"+
+		"          : AverageTime:  %s\n"+
+		"          : AveragePerRun %s\n", name, stats.Count, stats.Runcount, stats.Maxtime.String(), stats.Mintime.String(), averageTime.String(), averagePerRun.String())
 }
