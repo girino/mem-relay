@@ -20,7 +20,6 @@ import (
 	"github.com/fiatjaf/eventstore"
 
 	"github.com/fiatjaf/khatru"
-	//"github.com/girino/eventstore/lmdb"
 
 	"gitea.girino.org/girino/nostr-relay/slicestore"
 
@@ -33,17 +32,11 @@ var (
 )
 
 type Config struct {
-	Relays                 []string `json:"relays"`
-	WriteRelays            []string `json:"writeRelays"`
-	DbPath                 string   `json:"dbPath"`
-	BlacklistPath          string   `json:"blacklistPath"`
-	RelayName              string   `json:"relayName"`
-	NSec                   string   `json:"nSec"`
-	MinDifficulty          int      `json:"minDifficulty"`
-	WotPubkey              string   `json:"wotPubkey"`
-	WotDepth               int      `json:"wotDepth"`
-	WoTMinimumFollowers    int      `json:"wotMinimumFollowers"`
-	WotRefrreshTimeSeconds int      `json:"wotRefrreshTimeSeconds"`
+	Relays      []string `json:"relays"`
+	WriteRelays []string `json:"writeRelays"`
+	DbPath      string   `json:"dbPath"`
+	RelayName   string   `json:"relayName"`
+	NSec        string   `json:"nSec"`
 }
 
 type RelayInfo struct {
@@ -87,27 +80,12 @@ func main() {
 	relayMap["main"] = createRelay("main", mainDescription, eventChannel, func(event *nostr.Event) bool {
 		return true
 	})
-	// relayMap["main"] = createRelay("main", mainDescription, eventChannel, BlockReplyGuysAcceptEvent)
-	// nip13Description := config.RelayName + ": NIP-13 Relay with minimum difficulty of " + strconv.Itoa(config.MinDifficulty)
-	// relayMap["nip13"] = createRelay("nip13", nip13Description, eventChannel, func(event *nostr.Event) bool {
-	// 	return ValidatePoW(event, config.MinDifficulty)
-	// })
-	// relayMap["wot"] = CreateWotRelay(ctx, "wot", config.RelayName+": Web of Trust Relay", eventChannel)
-
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		dynamicRelayHandler(w, r, relayMap)
 	})
 
-	// go restartableBackgroundFunction(ctx, func(parentContext context.Context) {
-	// 	copyFromUpstream(parentContext, relayMap)
-	// })
 	go copyFromUpstream(ctx, relayMap)
 
-	// // send to upstream relays ust in case
-	// // Start the consumer goroutine
-	// go restartableBackgroundFunction(ctx, func(parentContext context.Context) {
-	// 	consumeSavedEvents(parentContext, eventChannel)
-	// })
 	go consumeSavedEvents(ctx, eventChannel)
 
 	// monitoring resources
@@ -130,8 +108,8 @@ func main() {
 		os.Exit(0)
 	}()
 
-	log.Println("running on :3335")
-	err = http.ListenAndServe(":3335", handler)
+	log.Println("running on :3336")
+	err = http.ListenAndServe(":3336", handler)
 	if err != nil {
 		log.Println("error starting server:", err)
 	}
@@ -151,7 +129,6 @@ func monitorResources(parentContext context.Context) {
 				m.Alloc/1024/1024,
 				m.Sys/1024/1024,
 				m.NumGC)
-			log.Println("🫂 network size:", len(pubkeyFollowerCount))
 			time.Sleep(30 * time.Second)
 		}
 	}
@@ -252,11 +229,8 @@ func createRelay(relayName string, description string, eventChannel chan<- *nost
 	relay.Info.PubKey = addressHex
 	relay.Info.Description = description
 
-	// db := sqlite3.SQLite3Backend{DatabaseURL: config.DbPath + "/" + relayName + "/" + relayName + ".db"}
-	// db = badger.BadgerBackend{Path: config.DbPath + "/" + relayName}
-	// db := lmdb.LMDBBackend{Path: config.DbPath + "/" + relayName, MapSize: 1 << 34}
 	db := slicestore.SliceStore{Path: config.DbPath + "/" + "slice.json"}
-	// os.MkdirAll(config.DbPath+"/"+relayName, 0755)
+	os.MkdirAll(config.DbPath, 0755)
 	if err := db.Init(); err != nil {
 		panic(err)
 	}
@@ -301,10 +275,7 @@ func createRelay(relayName string, description string, eventChannel chan<- *nost
 }
 
 func getFullURL(r *http.Request) string {
-	// scheme := "http"
-	// if r.TLS != nil {
 	scheme := "https" // force https
-	// }
 	return fmt.Sprintf("%s://%s%s", scheme, r.Host, r.URL.RequestURI())
 }
 
@@ -360,48 +331,6 @@ func copyFromUpstream(parentContext context.Context, relays map[string]RelayPoin
 	}
 }
 
-// func restartableBackgroundFunction(parentContext context.Context, funcToRun func(pc context.Context)) {
-// 	var panicCount int
-// 	var firstPanicTime time.Time
-
-// 	for {
-// 		select {
-// 		case <-parentContext.Done():
-// 			log.Println("Parent context canceled. Exiting restartableBackgroundFunction.")
-// 			return
-// 		default:
-// 		}
-// 		func() {
-// 			defer func() {
-// 				if r := recover(); r != nil {
-// 					log.Println("Recovered from panic:", r)
-// 					panicCount++
-// 					if panicCount == 1 {
-// 						firstPanicTime = time.Now()
-// 					}
-// 					if panicCount > 3 && time.Since(firstPanicTime) <= 1*time.Minute {
-// 						log.Println("Too many panics in a short time. Exiting application.")
-// 						os.Exit(1)
-// 					}
-// 					if time.Since(firstPanicTime) > 1*time.Minute {
-// 						panicCount = 1
-// 						firstPanicTime = time.Now()
-// 					}
-// 				}
-// 			}()
-// 			funcToRun(parentContext)
-// 		}()
-// 		select {
-// 		case <-parentContext.Done():
-// 			log.Println("Parent context canceled. Exiting restartableBackgroundFunction.")
-// 			return
-// 		default:
-// 			log.Println("Restarting Go routine in 10 secs")
-// 			time.Sleep(10 * time.Second) // Optional: Add a delay before restarting
-// 		}
-// 	}
-// }
-
 func readConfigsFromJSON(filename string) (*Config, error) {
 	file, err := os.Open(filename)
 	if err != nil {
@@ -418,34 +347,6 @@ func readConfigsFromJSON(filename string) (*Config, error) {
 	err = json.Unmarshal(byteValue, &config)
 	if err != nil {
 		return nil, err
-	}
-	if config.MinDifficulty < 0 || config.MinDifficulty > 255 {
-		return nil, fmt.Errorf("MinDifficulty must be between 0 and 255")
-	} else if config.MinDifficulty == 0 {
-		config.MinDifficulty = 5 // defaults to 5
-	}
-
-	if strings.HasPrefix(config.WotPubkey, "npub") {
-		_, addressHex, err := nip19.Decode(config.WotPubkey)
-		if err != nil {
-			return nil, err
-		}
-		config.WotPubkey = addressHex.(string)
-	}
-	if len(config.WotPubkey) != 64 {
-		return nil, fmt.Errorf("WotPubkey must be a 64 character hex string")
-	}
-
-	if config.WotDepth < 1 {
-		config.WotDepth = 3 // defaults to 3
-	}
-
-	if config.WoTMinimumFollowers <= 0 {
-		config.WoTMinimumFollowers = 1 // defaults to 1
-	}
-
-	if config.WotRefrreshTimeSeconds <= 0 {
-		config.WotRefrreshTimeSeconds = (3600 * 3) // defaults to 3 hours
 	}
 
 	return &config, nil
