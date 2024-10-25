@@ -1,0 +1,8 @@
+db/
+.env
+wot-relay
+data/
+data/*
+config.json
+.history/*
+.history

@@ -1,0 +1,28 @@
+{
+    "relays": [
+		"wss://nos.lol",
+		"wss://nostr.mom",
+		"wss://purplepag.es",
+		"wss://purplerelay.com",
+		"wss://relay.damus.io",
+		"wss://relay.nostr.band",
+		"wss://relay.snort.social",
+		"wss://relayable.org",
+		"wss://relay.primal.net",
+		"wss://relay.nostr.bg",
+		"wss://no.str.cr",
+		"wss://nostr21.com",
+		"wss://nostrue.com",
+		"wss://relay.siamstr.com",
+        "wss://relay.mostr.pub"
+    ],
+    "dbPath": "./data/db",
+    "blacklistPath": "./data/blacklist.json",
+	"relayName": "Your Relay Name",
+	"nsec": "nsec1...relay.private.key",
+    "minDifficulty": 5,
+    "wotPubkey": "npub1...web.of.trust.public.key",
+	"wotDepth": 3,
+	"wotMinimumFollowers": 1,
+    "wotRefrreshTimeSeconds": 7200
+}
