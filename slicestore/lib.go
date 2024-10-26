@@ -16,22 +16,26 @@ import (
 
 var _ eventstore.Store = (*SliceStore)(nil)
 
+// Define the Index interface
+type Index interface {
+	AddEvent(evt *nostr.Event)
+	RemoveEvent(evt *nostr.Event)
+	RetrieveEvents(filter nostr.Filter) []*nostr.Event
+	DoesIndexApplyToFilter(filter nostr.Filter) bool
+	GetStats() *IndexStats
+	GetName() string
+}
+
 type SliceStore struct {
 	internal []*nostr.Event
 
 	MaxLimit int
 	Path     string
 
-	indexId         *map[string]*nostr.Event
-	indexKindAuthor *map[KindAuthor][]*nostr.Event
+	indexes []Index
 
 	// stats
-	stats           IndexStats
-	idstats         IndexStats
-	kindauthorstats IndexStats
-
-	// locks
-	mu sync.RWMutex
+	stats IndexStats
 }
 
 type KindAuthor struct {
@@ -47,10 +51,146 @@ type IndexStats struct {
 	TotalTime time.Duration
 }
 
+// Define the GenericIndex struct
+type GenericIndex[K comparable] struct {
+	index                  map[K][]*nostr.Event
+	mu                     sync.RWMutex
+	stats                  IndexStats
+	name                   string
+	doesIndexApplyToFilter func(filter nostr.Filter) bool
+	getKey                 func(evt *nostr.Event) K
+	getKeyFilter           func(filter nostr.Filter) K
+}
+
+// NewGenericIndex creates a new GenericIndex
+// func NewGenericIndex[K comparable](name string) *GenericIndex[K] {
+// 	return &GenericIndex[K]{
+// 		index: make(map[K][]*nostr.Event),
+// 		name:  name,
+// 	}
+// }
+
+func NewIdIndex() *GenericIndex[string] {
+	return &GenericIndex[string]{
+		index: make(map[string][]*nostr.Event),
+		name:  "ID",
+		getKey: func(evt *nostr.Event) string {
+			return evt.ID
+		},
+		getKeyFilter: func(filter nostr.Filter) string {
+			return filter.IDs[0]
+		},
+		doesIndexApplyToFilter: func(filter nostr.Filter) bool {
+			return len(filter.IDs) == 1
+		},
+	}
+}
+
+func NewKindAuthorIndex() *GenericIndex[KindAuthor] {
+	return &GenericIndex[KindAuthor]{
+		index: make(map[KindAuthor][]*nostr.Event),
+		name:  "KindAuthor",
+		getKey: func(evt *nostr.Event) KindAuthor {
+			return KindAuthor{Kind: evt.Kind, Author: evt.PubKey}
+		},
+		getKeyFilter: func(filter nostr.Filter) KindAuthor {
+			return KindAuthor{Kind: filter.Kinds[0], Author: filter.Authors[0]}
+		},
+		doesIndexApplyToFilter: func(filter nostr.Filter) bool {
+			return len(filter.Kinds) == 1 && len(filter.Authors) == 1
+		},
+	}
+}
+
+func (gi *GenericIndex[K]) GetName() string {
+	return gi.name
+}
+
+func (gi *GenericIndex[K]) GetStats() *IndexStats {
+	return &gi.stats
+}
+
+func (gi *GenericIndex[K]) DoesIndexApplyToFilter(filter nostr.Filter) bool {
+	if gi.doesIndexApplyToFilter == nil {
+		return false
+	}
+	return gi.doesIndexApplyToFilter(filter)
+}
+
+func (gi *GenericIndex[K]) GetKey(evt *nostr.Event) K {
+	return gi.getKey(evt)
+}
+
+// AddEvent adds an event to the index in a sorted way
+func (gi *GenericIndex[K]) AddEvent(evt *nostr.Event) {
+	gi.mu.Lock()
+	defer gi.mu.Unlock()
+
+	key := gi.getKey(evt)
+
+	events, exists := gi.index[key]
+	if !exists {
+		events = []*nostr.Event{}
+	}
+
+	idx, found := slices.BinarySearchFunc(events, evt, eventComparator)
+	if found {
+		return
+	}
+	// let's insert at the correct place in the array
+	events = append(events, evt) // bogus
+	copy(events[idx+1:], events[idx:])
+	events[idx] = evt
+
+	gi.index[key] = events
+}
+
+// RemoveEvent removes an event from the index
+func (gi *GenericIndex[K]) RemoveEvent(evt *nostr.Event) {
+	gi.mu.Lock()
+	defer gi.mu.Unlock()
+
+	key := gi.getKey(evt)
+	events, exists := gi.index[key]
+	if !exists {
+		return
+	}
+
+	idx, found := slices.BinarySearchFunc(events, evt, eventComparator)
+	if !found {
+		// we don't have this event
+		return
+	}
+
+	// we have it
+	copy(events[idx:], events[idx+1:])
+	events = events[0 : len(events)-1]
+
+	// Update the map
+	if len(events) == 0 {
+		delete(gi.index, key)
+	} else {
+		gi.index[key] = events
+	}
+}
+
+// RetrieveEvents retrieves events based on a filter
+func (gi *GenericIndex[K]) RetrieveEvents(filter nostr.Filter) []*nostr.Event {
+	gi.mu.RLock()
+	defer gi.mu.RUnlock()
+
+	key := gi.getKeyFilter(filter)
+
+	return gi.index[key]
+}
+
 func (b *SliceStore) Init() error {
 	b.internal = make([]*nostr.Event, 0, 5000)
-	b.indexId = &map[string]*nostr.Event{}
-	b.indexKindAuthor = &map[KindAuthor][]*nostr.Event{}
+	// declare a static array
+	b.indexes = []Index{
+		NewIdIndex(),
+		NewKindAuthorIndex(),
+	}
 
 	if b.MaxLimit == 0 {
 		b.MaxLimit = 500
@@ -78,9 +218,11 @@ func (b *SliceStore) Init() error {
 				}
 			case <-ticker1.C:
 				// print the stats
-				printStats("Main      ", b.stats)
-				printStats("ID        ", b.idstats)
-				printStats("KindAuthor", b.kindauthorstats)
+				printStats("Main", b.stats)
+				// print the stats of the indexes
+				for _, index := range b.indexes {
+					printStats(index.GetName(), *index.GetStats())
+				}
 				// print the slice size
 				fmt.Printf("Slice size: %d\n", len(b.internal))
 			}
@@ -108,14 +250,16 @@ func (b *SliceStore) LoadEventsFromDisk() error {
 	}
 
 	// Rebuild the index
-	b.mu.Lock()
-	*b.indexId = map[string]*nostr.Event{}
-	*b.indexKindAuthor = map[KindAuthor][]*nostr.Event{}
-	for _, evt := range b.internal {
-		(*b.indexId)[evt.ID] = evt
-		b.AddEventToIndex(evt)
+	b.indexes = []Index{
+		NewIdIndex(),
+		NewKindAuthorIndex(),
 	}
-	b.mu.Unlock()
+
+	for _, evt := range b.internal {
+		for _, index := range b.indexes {
+			index.AddEvent(evt)
+		}
+	}
 
 	return nil
 }
@@ -145,76 +289,44 @@ func (b *SliceStore) SaveEventsToDisk() error {
 func (b *SliceStore) Close() {}
 
 func (b *SliceStore) QueryEvents(ctx context.Context, filter nostr.Filter) (chan *nostr.Event, error) {
+	startTime := time.Now()
+
 	ch := make(chan *nostr.Event)
 	if filter.Limit > b.MaxLimit || filter.Limit == 0 {
 		filter.Limit = b.MaxLimit
 	}
 
-	// if index can be used, use it
-	if len(filter.IDs) == 1 {
-		go measureTime(&b.idstats, func() int {
-			count := 0
-			b.mu.RLock()
-			defer b.mu.RUnlock()
-			if evt, ok := (*b.indexId)[filter.IDs[0]]; ok {
-				if filter.Matches(evt) {
-					ch <- evt
-					count++
-				}
-			}
-			close(ch)
-			return count
-		})
-		return ch, nil
-	}
-
-	if len(filter.Kinds) == 1 && len(filter.Authors) == 1 {
-		go measureTime(&b.kindauthorstats, func() int {
-			count := 0
-			b.mu.RLock()
-			events, ok := (*b.indexKindAuthor)[KindAuthor{Kind: filter.Kinds[0], Author: filter.Authors[0]}]
-			b.mu.RUnlock()
-			if ok {
-				for _, evt := range events {
-					if count >= filter.Limit {
-						break
-					}
-					count++
-					if filter.Matches(evt) {
-						count++
-						select {
-						case ch <- evt:
-						case <-ctx.Done():
-							return count
-						}
-					}
-				}
-			}
-			close(ch)
-			return count
-		})
-		return ch, nil
+	events := b.internal
+	stats := &b.stats
+	// iterate over b.indexes and check if the index applies to the filter
+	for _, index := range b.indexes {
+		if index.DoesIndexApplyToFilter(filter) {
+			events = index.RetrieveEvents(filter)
+			stats = index.GetStats()
+			break
+		}
 	}
 
 	// efficiently determine where to start and end
 	start := 0
-	end := len(b.internal)
+	end := len(events)
 	if filter.Until != nil {
-		start, _ = slices.BinarySearchFunc(b.internal, *filter.Until, eventTimestampComparator)
+		start, _ = slices.BinarySearchFunc(events, *filter.Until, eventTimestampComparator)
 	}
 	if filter.Since != nil {
-		end, _ = slices.BinarySearchFunc(b.internal, *filter.Since, eventTimestampComparator)
+		end, _ = slices.BinarySearchFunc(events, *filter.Since, eventTimestampComparator)
 	}
 
 	// ham
 	if end < start {
 		close(ch)
+		updateStats(stats, startTime, 0)
 		return ch, nil
 	}
 
-	go measureTime(&b.stats, func() int {
+	go func() {
 		count := 0
-		for _, event := range b.internal[start:end] {
+		for _, event := range events[start:end] {
 			if count == filter.Limit {
 				break
 			}
@@ -223,14 +335,15 @@ func (b *SliceStore) QueryEvents(ctx context.Context, filter nostr.Filter) (chan
 				select {
 				case ch <- event:
 				case <-ctx.Done():
-					return 0
+					updateStats(stats, startTime, count)
+					return
 				}
 				count++
 			}
 		}
 		close(ch)
-		return count
-	})
+		updateStats(stats, startTime, count)
+	}()
 	return ch, nil
 }
 
@@ -244,52 +357,6 @@ func (b *SliceStore) CountEvents(ctx context.Context, filter nostr.Filter) (int6
 	return val, nil
 }
 
-// AddEventToIndex adds an event to the indexKindAuthor map in a sorted way
-func (b *SliceStore) AddEventToIndex(evt *nostr.Event) {
-	key := KindAuthor{Kind: evt.Kind, Author: evt.PubKey}
-	events, exists := (*b.indexKindAuthor)[key]
-	if !exists {
-		events = []*nostr.Event{}
-	}
-
-	idx, found := slices.BinarySearchFunc(events, evt, eventComparator)
-	if found {
-		return
-	}
-	// let's insert at the correct place in the array
-	events = append(events, evt) // bogus
-	copy(events[idx+1:], events[idx:])
-	events[idx] = evt
-
-	(*b.indexKindAuthor)[key] = events
-}
-
-// RemoveEventFromIndex removes an event from the indexKindAuthor map
-func (b *SliceStore) RemoveEventFromIndex(evt *nostr.Event) {
-	key := KindAuthor{Kind: evt.Kind, Author: evt.PubKey}
-	events, exists := (*b.indexKindAuthor)[key]
-	if !exists {
-		return
-	}
-
-	idx, found := slices.BinarySearchFunc(events, evt, eventComparator)
-	if !found {
-		// we don't have this event
-		return
-	}
-
-	// we have it
-	copy(events[idx:], events[idx+1:])
-	events = events[0 : len(events)-1]
-
-	// Update the map
-	if len(events) == 0 {
-		delete((*b.indexKindAuthor), key)
-	} else {
-		(*b.indexKindAuthor)[key] = events
-	}
-}
-
 func (b *SliceStore) SaveEvent(ctx context.Context, evt *nostr.Event) error {
 	idx, found := slices.BinarySearchFunc(b.internal, evt, eventComparator)
 	if found {
@@ -301,10 +368,9 @@ func (b *SliceStore) SaveEvent(ctx context.Context, evt *nostr.Event) error {
 	b.internal[idx] = evt
 
 	// update the index
-	b.mu.Lock()
-	(*b.indexId)[evt.ID] = evt
-	b.AddEventToIndex(evt)
-	b.mu.Unlock()
+	for _, index := range b.indexes {
+		index.AddEvent(evt)
+	}
 
 	return nil
 }
@@ -321,10 +387,9 @@ func (b *SliceStore) DeleteEvent(ctx context.Context, evt *nostr.Event) error {
 	b.internal = b.internal[0 : len(b.internal)-1]
 
 	// update the index
-	b.mu.Lock()
-	delete(*b.indexId, evt.ID)
-	b.RemoveEventFromIndex(evt)
-	b.mu.Unlock()
+	for _, index := range b.indexes {
+		index.RemoveEvent(evt)
+	}
 
 	return nil
 }
@@ -342,9 +407,7 @@ func eventComparator(a *nostr.Event, b *nostr.Event) int {
 }
 
 // a function that receives an eventstats and a function, meausres the running time of the function and updates the eventstats
-func measureTime(stats *IndexStats, f func() int) {
-	startTime := time.Now()
-	increment := f()
+func updateStats(stats *IndexStats, startTime time.Time, increment int) {
 	endTime := time.Now()
 	elapsedTime := endTime.Sub(startTime)
 	stats.TotalTime += elapsedTime
@@ -370,7 +433,8 @@ func printStats(name string, stats IndexStats) {
 		averagePerRun = stats.TotalTime / time.Duration(stats.Runcount)
 	}
 	// also print the average time
-	fmt.Printf("%s: Count:        %d\n"+
+	fmt.Printf("%s:\n"+
+		"          : Count:        %d\n"+
 		"          : RunCount:     %d\n"+
 		"          : Maxtime:      %s\n"+
 		"          : Mintime:      %s\n"+
