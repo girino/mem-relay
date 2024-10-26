@@ -123,7 +123,7 @@ func NewKindIndex() *GenericIndex[int] {
 			return filter.Kinds
 		},
 		doesIndexApplyToFilter: func(filter nostr.Filter) bool {
-			return len(filter.Kinds) == 1
+			return len(filter.Kinds) >= 1
 		},
 	}
 }
@@ -235,12 +235,7 @@ func (gi *GenericIndex[K]) RetrieveEvents(filter nostr.Filter) []*nostr.Event {
 func (b *SliceStore) Init() error {
 	b.internal = make([]*nostr.Event, 0, 5000)
 	// declare a static array
-	b.indexes = []Index{
-		NewIdIndex(),
-		NewKindAuthorIndex(),
-		NewKindIndex(),
-		NewAuthorIndex(),
-	}
+	b.indexes = createIndexes()
 
 	if b.MaxLimit == 0 {
 		b.MaxLimit = 500
@@ -310,12 +305,7 @@ func (b *SliceStore) LoadEventsFromDisk(filename string) error {
 	}
 
 	// Rebuild the index
-	b.indexes = []Index{
-		NewIdIndex(),
-		NewKindAuthorIndex(),
-		NewKindIndex(),
-		NewAuthorIndex(),
-	}
+	b.indexes = createIndexes()
 
 	for _, evt := range b.internal {
 		for _, index := range b.indexes {
@@ -325,6 +315,15 @@ func (b *SliceStore) LoadEventsFromDisk(filename string) error {
 
 	fmt.Printf("Loaded %d events\n", len(b.internal))
 	return nil
+}
+
+func createIndexes() []Index {
+	return []Index{
+		NewIdIndex(),
+		NewKindAuthorIndex(),
+		NewAuthorIndex(),
+		NewKindIndex(),
+	}
 }
 
 // SaveEventsToDisk saves all events to a JSON file at the specified path
