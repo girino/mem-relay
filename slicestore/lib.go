@@ -26,6 +26,16 @@ type Index interface {
 	GetName() string
 }
 
+// needs indexes for
+// multiple ids
+// multiple authors
+// kinds 0,2,3,10002
+// kind 6,7 + 1 author
+// Tag e
+// tag p
+
+// create an index for multiple ids, using the index for ids NewIdIndex() and merging the resulting slices
+
 type SliceStore struct {
 	internal []*nostr.Event
 
@@ -487,10 +497,14 @@ func printStats(name string, stats IndexStats) {
 	}
 	// also print the average time
 	fmt.Printf("%s:\n"+
-		"          : Count:        %d\n"+
-		"          : RunCount:     %d\n"+
-		"          : Maxtime:      %s\n"+
-		"          : Mintime:      %s\n"+
-		"          : AverageTime:  %s\n"+
-		"          : AveragePerRun %s\n", name, stats.Count, stats.Runcount, stats.Maxtime.String(), stats.Mintime.String(), averageTime.String(), averagePerRun.String())
+		"          : Count:         %d\n"+
+		"          : RunCount:      %d\n"+
+		"          : Maxtime:       %s\n"+
+		"          : Mintime:       %s\n"+
+		"          : AverageTime:   %s\n"+
+		"          : AveragePerRun: %s\n"+
+		"          : TotalTime:     %s\n",
+		name, stats.Count, stats.Runcount, stats.Maxtime.String(),
+		stats.Mintime.String(), averageTime.String(),
+		averagePerRun.String(), stats.TotalTime.String())
 }
