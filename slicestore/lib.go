@@ -69,7 +69,7 @@ type GenericIndex[K comparable] struct {
 	name                   string
 	doesIndexApplyToFilter func(filter nostr.Filter) bool
 	getKey                 func(evt *nostr.Event) K
-	getKeyFilter           func(filter nostr.Filter) K
+	getKeyFilter           func(filter nostr.Filter) []K
 }
 
 // NewGenericIndex creates a new GenericIndex
@@ -87,11 +87,11 @@ func NewIdIndex() *GenericIndex[string] {
 		getKey: func(evt *nostr.Event) string {
 			return evt.ID
 		},
-		getKeyFilter: func(filter nostr.Filter) string {
-			return filter.IDs[0]
+		getKeyFilter: func(filter nostr.Filter) []string {
+			return filter.IDs
 		},
 		doesIndexApplyToFilter: func(filter nostr.Filter) bool {
-			return len(filter.IDs) == 1
+			return len(filter.IDs) >= 1
 		},
 	}
 }
@@ -103,8 +103,8 @@ func NewKindAuthorIndex() *GenericIndex[KindAuthor] {
 		getKey: func(evt *nostr.Event) KindAuthor {
 			return KindAuthor{Kind: evt.Kind, Author: evt.PubKey}
 		},
-		getKeyFilter: func(filter nostr.Filter) KindAuthor {
-			return KindAuthor{Kind: filter.Kinds[0], Author: filter.Authors[0]}
+		getKeyFilter: func(filter nostr.Filter) []KindAuthor {
+			return []KindAuthor{{Kind: filter.Kinds[0], Author: filter.Authors[0]}}
 		},
 		doesIndexApplyToFilter: func(filter nostr.Filter) bool {
 			return len(filter.Kinds) == 1 && len(filter.Authors) == 1
@@ -119,11 +119,27 @@ func NewKindIndex() *GenericIndex[int] {
 		getKey: func(evt *nostr.Event) int {
 			return evt.Kind
 		},
-		getKeyFilter: func(filter nostr.Filter) int {
-			return filter.Kinds[0]
+		getKeyFilter: func(filter nostr.Filter) []int {
+			return filter.Kinds
 		},
 		doesIndexApplyToFilter: func(filter nostr.Filter) bool {
 			return len(filter.Kinds) == 1
+		},
+	}
+}
+
+func NewAuthorIndex() *GenericIndex[string] {
+	return &GenericIndex[string]{
+		index: make(map[string][]*nostr.Event),
+		name:  "Author",
+		getKey: func(evt *nostr.Event) string {
+			return evt.PubKey
+		},
+		getKeyFilter: func(filter nostr.Filter) []string {
+			return filter.Authors
+		},
+		doesIndexApplyToFilter: func(filter nostr.Filter) bool {
+			return len(filter.Authors) >= 1
 		},
 	}
 }
@@ -205,9 +221,15 @@ func (gi *GenericIndex[K]) RetrieveEvents(filter nostr.Filter) []*nostr.Event {
 	gi.mu.RLock()
 	defer gi.mu.RUnlock()
 
-	key := gi.getKeyFilter(filter)
+	keys := gi.getKeyFilter(filter)
+	events := make([]*nostr.Event, 0)
+	for _, key := range keys {
+		if keyEvents, exists := gi.index[key]; exists {
+			events = mergeSortedSlices(events, keyEvents, eventComparator)
+		}
+	}
 
-	return gi.index[key]
+	return events
 }
 
 func (b *SliceStore) Init() error {
@@ -217,6 +239,7 @@ func (b *SliceStore) Init() error {
 		NewIdIndex(),
 		NewKindAuthorIndex(),
 		NewKindIndex(),
+		NewAuthorIndex(),
 	}
 
 	if b.MaxLimit == 0 {
@@ -291,6 +314,7 @@ func (b *SliceStore) LoadEventsFromDisk(filename string) error {
 		NewIdIndex(),
 		NewKindAuthorIndex(),
 		NewKindIndex(),
+		NewAuthorIndex(),
 	}
 
 	for _, evt := range b.internal {
@@ -507,4 +531,34 @@ func printStats(name string, stats IndexStats) {
 		name, stats.Count, stats.Runcount, stats.Maxtime.String(),
 		stats.Mintime.String(), averageTime.String(),
 		averagePerRun.String(), stats.TotalTime.String())
+}
+
+// mergeSortedSlices merges two sorted slices of events
+func mergeSortedSlices(a, b []*nostr.Event, eventComparator func(a *nostr.Event, b *nostr.Event) int) []*nostr.Event {
+	result := make([]*nostr.Event, 0, len(a)+len(b))
+	i, j := 0, 0
+	la, lb := len(a), len(b)
+	for i < la && j < lb {
+		cmp := eventComparator(a[i], b[j])
+		if cmp < 0 {
+			result = append(result, a[i])
+			i++
+		} else if cmp == 0 {
+			result = append(result, a[i])
+			i++
+			j++
+		} else {
+			result = append(result, b[j])
+			j++
+		}
+	}
+	for i < la {
+		result = append(result, a[i])
+		i++
+	}
+	for j < lb {
+		result = append(result, b[j])
+		j++
+	}
+	return result
 }
