@@ -102,6 +102,22 @@ func NewKindAuthorIndex() *GenericIndex[KindAuthor] {
 	}
 }
 
+func NewKindIndex() *GenericIndex[int] {
+	return &GenericIndex[int]{
+		index: make(map[int][]*nostr.Event),
+		name:  "Kind",
+		getKey: func(evt *nostr.Event) int {
+			return evt.Kind
+		},
+		getKeyFilter: func(filter nostr.Filter) int {
+			return filter.Kinds[0]
+		},
+		doesIndexApplyToFilter: func(filter nostr.Filter) bool {
+			return len(filter.Kinds) == 1
+		},
+	}
+}
+
 func (gi *GenericIndex[K]) GetName() string {
 	return gi.name
 }
@@ -190,6 +206,7 @@ func (b *SliceStore) Init() error {
 	b.indexes = []Index{
 		NewIdIndex(),
 		NewKindAuthorIndex(),
+		NewKindIndex(),
 	}
 
 	if b.MaxLimit == 0 {
@@ -263,6 +280,7 @@ func (b *SliceStore) LoadEventsFromDisk(filename string) error {
 	b.indexes = []Index{
 		NewIdIndex(),
 		NewKindAuthorIndex(),
+		NewKindIndex(),
 	}
 
 	for _, evt := range b.internal {
