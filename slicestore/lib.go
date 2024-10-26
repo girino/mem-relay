@@ -347,13 +347,21 @@ func (b *SliceStore) QueryEvents(ctx context.Context, filter nostr.Filter) (chan
 func (b *SliceStore) getEventsSlice(filter nostr.Filter) ([]*nostr.Event, *IndexStats) {
 	events := b.internal
 	stats := &b.stats
+	isFilter := false
 
 	for _, index := range b.indexes {
 		if index.DoesIndexApplyToFilter(filter) {
 			events = index.RetrieveEvents(filter)
 			stats = index.GetStats()
+			isFilter = true
 			break
 		}
+	}
+
+	if !isFilter {
+		fmt.Println("No index found for filter")
+		// print the filter
+		fmt.Printf("Filter: %+v\n", filter)
 	}
 
 	start := 0
