@@ -200,9 +200,18 @@ func (b *SliceStore) Init() error {
 	}
 
 	// Load events from disk
-	if err := b.LoadEventsFromDisk(); err != nil {
+	if err := b.LoadEventsFromDisk(b.Path); err != nil {
+		// retry with backup file
 		fmt.Printf("Error loading events from disk: %v\n", err)
+		// if backup exists
+		if _, err := os.Stat(b.Path + ".bak"); err == nil {
+			fmt.Println("Retrying with backup file")
+			if err := b.LoadEventsFromDisk(b.Path + ".bak"); err != nil {
+				fmt.Printf("Error loading events from backup: %v\n", err)
+			}
+		}
 	}
+	// retry with backup file
 
 	// Launch a goroutine to save events to disk every 30 minutes
 	go func() {
@@ -233,8 +242,9 @@ func (b *SliceStore) Init() error {
 }
 
 // LoadEventsFromDisk loads events from a JSON file at the specified path
-func (b *SliceStore) LoadEventsFromDisk() error {
-	file, err := os.Open(b.Path)
+func (b *SliceStore) LoadEventsFromDisk(filename string) error {
+	fmt.Printf("Loading events from disk: %s\n", filename)
+	file, err := os.Open(filename)
 	if err != nil {
 		if os.IsNotExist(err) {
 			// If the file does not exist, it's not an error; just return
@@ -261,12 +271,20 @@ func (b *SliceStore) LoadEventsFromDisk() error {
 		}
 	}
 
+	fmt.Printf("Loaded %d events\n", len(b.internal))
 	return nil
 }
 
 // SaveEventsToDisk saves all events to a JSON file at the specified path
 func (b *SliceStore) SaveEventsToDisk() error {
 	startTime := time.Now()
+
+	// copy current file to b.Path + ".bak"
+	if _, err := os.Stat(b.Path); err == nil {
+		if err := os.Rename(b.Path, b.Path+".bak"); err != nil {
+			return err
+		}
+	}
 
 	file, err := os.Create(b.Path)
 	if err != nil {
