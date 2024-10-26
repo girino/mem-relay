@@ -123,7 +123,16 @@ func NewKindIndex() *GenericIndex[int] {
 			return filter.Kinds
 		},
 		doesIndexApplyToFilter: func(filter nostr.Filter) bool {
-			return len(filter.Kinds) >= 1
+			if len(filter.Kinds) < 1 {
+				return false
+			}
+			for _, kind := range filter.Kinds {
+				// full scan if contains 1, 5 or 7, the most common events
+				if kind == 1 || kind == 5 || kind == 7 {
+					return false
+				}
+			}
+			return true
 		},
 	}
 }
