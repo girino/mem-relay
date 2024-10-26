@@ -314,29 +314,8 @@ func (b *SliceStore) QueryEvents(ctx context.Context, filter nostr.Filter) (chan
 		filter.Limit = b.MaxLimit
 	}
 
-	events := b.internal
-	stats := &b.stats
-	// iterate over b.indexes and check if the index applies to the filter
-	for _, index := range b.indexes {
-		if index.DoesIndexApplyToFilter(filter) {
-			events = index.RetrieveEvents(filter)
-			stats = index.GetStats()
-			break
-		}
-	}
-
-	// efficiently determine where to start and end
-	start := 0
-	end := len(events)
-	if filter.Until != nil {
-		start, _ = slices.BinarySearchFunc(events, *filter.Until, eventTimestampComparator)
-	}
-	if filter.Since != nil {
-		end, _ = slices.BinarySearchFunc(events, *filter.Since, eventTimestampComparator)
-	}
-
-	// ham
-	if end < start {
+	events, stats := b.getEventsSlice(filter)
+	if events == nil {
 		close(ch)
 		updateStats(stats, startTime, 0)
 		return ch, nil
@@ -344,7 +323,7 @@ func (b *SliceStore) QueryEvents(ctx context.Context, filter nostr.Filter) (chan
 
 	go func() {
 		count := 0
-		for _, event := range events[start:end] {
+		for _, event := range events {
 			if count == filter.Limit {
 				break
 			}
@@ -365,9 +344,39 @@ func (b *SliceStore) QueryEvents(ctx context.Context, filter nostr.Filter) (chan
 	return ch, nil
 }
 
+func (b *SliceStore) getEventsSlice(filter nostr.Filter) ([]*nostr.Event, *IndexStats) {
+	events := b.internal
+	stats := &b.stats
+
+	for _, index := range b.indexes {
+		if index.DoesIndexApplyToFilter(filter) {
+			events = index.RetrieveEvents(filter)
+			stats = index.GetStats()
+			break
+		}
+	}
+
+	start := 0
+	end := len(events)
+	if filter.Until != nil {
+		start, _ = slices.BinarySearchFunc(events, *filter.Until, eventTimestampComparator)
+	}
+	if filter.Since != nil {
+		end, _ = slices.BinarySearchFunc(events, *filter.Since, eventTimestampComparator)
+	}
+
+	if end < start {
+		return nil, stats
+	}
+
+	events = events[start:end]
+	return events, stats
+}
+
 func (b *SliceStore) CountEvents(ctx context.Context, filter nostr.Filter) (int64, error) {
 	var val int64
-	for _, event := range b.internal {
+	events, _ := b.getEventsSlice(filter)
+	for _, event := range events {
 		if filter.Matches(event) {
 			val++
 		}
