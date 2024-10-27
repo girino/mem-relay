@@ -269,9 +269,9 @@ func (b *SliceStore) Init() error {
 
 	// Launch a goroutine to save events to disk every 30 minutes
 	go func() {
-		ticker1 := time.NewTicker(30 * time.Second)
+		ticker1 := time.NewTicker(5 * time.Minute)
 		defer ticker1.Stop()
-		ticker2 := time.NewTicker(3 * time.Minute)
+		ticker2 := time.NewTicker(10 * time.Minute)
 		defer ticker2.Stop()
 		for {
 			select {
@@ -407,22 +407,22 @@ func (b *SliceStore) QueryEvents(ctx context.Context, filter nostr.Filter) (chan
 func (b *SliceStore) getEventsSlice(filter nostr.Filter) ([]*nostr.Event, *IndexStats) {
 	events := b.internal
 	stats := &b.stats
-	isFilter := false
+	// isFilter := false
 
 	for _, index := range b.indexes {
 		if index.DoesIndexApplyToFilter(filter) {
 			events = index.RetrieveEvents(filter)
 			stats = index.GetStats()
-			isFilter = true
+			// isFilter = true
 			break
 		}
 	}
 
-	if !isFilter {
-		fmt.Println("No index found for filter")
-		// print the filter
-		fmt.Printf("Filter: %+v\n", filter)
-	}
+	// if !isFilter {
+	// 	fmt.Println("No index found for filter")
+	// 	// print the filter
+	// 	fmt.Printf("Filter: %+v\n", filter)
+	// }
 
 	start := 0
 	end := len(events)
