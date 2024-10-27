@@ -269,7 +269,7 @@ func (b *SliceStore) Init() error {
 
 	// Launch a goroutine to save events to disk every 30 minutes
 	go func() {
-		ticker1 := time.NewTicker(5 * time.Minute)
+		ticker1 := time.NewTicker(10 * time.Minute)
 		defer ticker1.Stop()
 		ticker2 := time.NewTicker(10 * time.Minute)
 		defer ticker2.Stop()
@@ -281,11 +281,11 @@ func (b *SliceStore) Init() error {
 				}
 			case <-ticker1.C:
 				// print the stats
-				printStats("Main", b.stats)
+				// printStats("Main", b.stats)
 				// print the stats of the indexes
-				for _, index := range b.indexes {
-					printStats(index.GetName(), *index.GetStats())
-				}
+				// for _, index := range b.indexes {
+				// 	printStats(index.GetName(), *index.GetStats())
+				// }
 				// print the slice size
 				fmt.Printf("Slice size: %d\n", len(b.internal))
 			}

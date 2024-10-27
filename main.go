@@ -129,7 +129,7 @@ func monitorResources(parentContext context.Context) {
 				m.Alloc/1024/1024,
 				m.Sys/1024/1024,
 				m.NumGC)
-			time.Sleep(30 * time.Second)
+			time.Sleep(300 * time.Second)
 		}
 	}
 }
